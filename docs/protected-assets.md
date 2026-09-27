@@ -228,7 +228,7 @@ Then check:
    present?
 3. Whether any `193`/`194`/`293`/`294` ids appear in album responses.
 
-## Live test from a US host (2026-09-27)
+## Live test from a cloud host (2026-09-27)
 
 A dummy account's platform token was tried from a cloud container in the US.
 
@@ -241,24 +241,29 @@ session id.
 
 API responses to single requests:
 
-| Request | Result |
-|---|---|
-| Raw junk body | `500`, nginx page |
-| Encoded `POST /login` with the expired token | `403`, nginx page, no `x-sessionid` |
-| Encoded request with no `Authorization` | `403`, same |
-| Encoded request with a malformed JWT | `403`, same |
-| Same, with browser `User-Agent` and fetch headers | `403`, same page with browser padding |
+| Request | Client | Result |
+|---|---|---|
+| Random bytes, 1 to 500 | Node `fetch` | `403`, nginx page |
+| Encoded `POST /login`, expired, fake or no token | Node `fetch` | `403`, nginx page |
+| Single junk byte | `curl` | `500`, nginx page |
+| Encoded `POST /login`, no token | `curl` | `401`, encrypted body |
 
-The junk body reaching a `500` means the backend received it and failed to decode
-it. Every correctly encoded request got the same `403` regardless of token or
-headers, so the rejection happens after decoding and before the token matters.
-That fits a source IP or region allowlist on the API; the asset CDN answered
-normally from the same host. The API resolves to AWS `ap-northeast-1` addresses.
-Not proven without a request from a Japanese IP.
+The `403` answered anything sent by Node's `fetch`, junk included, so it is a filter
+on that client's request shape, not on the IP or the token. From the same host and
+IP, `curl` reached the game server. Its `401` body decoded with `decodeResponse`
+(empty session id) to:
+
+```json
+{"type":"","title":"Unauthorized","status":1010,"detail":"","instance":"/login","requestId":"..."}
+```
+
+So the request encoding, the transport and the response decoding all work outside
+the browser, from a non-Japanese cloud IP. The user also reaches the game from a
+normal, non-Japanese connection, so there is no region lock.
 
 Consequences for login support:
 
-- API calls have to leave from a network the game accepts, most likely the same
-  route the user plays through. The CDN part of the tool can keep running anywhere.
-- The command needs a fresh token at run time (argument-free: environment variable
-  or a file under `data/`), and should log in immediately.
+- The HTTP client matters. The .NET `HttpClient` request shape has to be checked
+  against the filter before building on it; match what `curl` sends if needed.
+- The command needs a fresh token at run time, read from an environment variable
+  or a file under `data/`, and should log in immediately.
