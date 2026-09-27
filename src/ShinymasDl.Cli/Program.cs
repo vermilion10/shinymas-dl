@@ -2,6 +2,8 @@ using System.CommandLine;
 using ShinymasDl.Core;
 using ShinymasDl.Core.Catalog;
 using ShinymasDl.Core.Download;
+using ShinymasDl.Core.Extraction;
+using ShinymasDl.Core.Naming;
 
 namespace ShinymasDl.Cli;
 
@@ -39,6 +41,8 @@ public static class Program
         root.Subcommands.Add(BuildRefreshCommand());
         root.Subcommands.Add(BuildListCommand());
         root.Subcommands.Add(BuildDownloadCommand());
+        root.Subcommands.Add(BuildNamesCommand());
+        root.Subcommands.Add(BuildExtractCommand());
 
         return await root.Parse(args).InvokeAsync();
     }
@@ -200,6 +204,97 @@ public static class Program
             Console.WriteLine(
                 $"{verb} {stats.Downloaded} ({Human(stats.Bytes)}), up to date {stats.Skipped}, " +
                 $"missing {stats.Missing}, failed {stats.Failed}");
+
+            return stats.Failed == 0 ? 0 : 1;
+        });
+
+        return command;
+    }
+
+    /// <summary> rebuilds names.json from the mirrored scripts, or keeps the cached one when none are mirrored </summary>
+    private static NameIndex ResolveNames(Workspace workspace)
+    {
+        var built = NameIndex.Build(workspace.RawRoot);
+        if (built.Count > 0)
+        {
+            built.Save(workspace.DataRoot);
+            return built;
+        }
+
+        return NameIndex.Load(workspace.DataRoot);
+    }
+
+    private static Command BuildNamesCommand()
+    {
+        var command = new Command("names", "Build character names from the mirrored story scripts and print them");
+
+        command.SetAction(parseResult =>
+        {
+            var workspace = WorkspaceFrom(parseResult);
+            var names = ResolveNames(workspace);
+
+            if (names.Count == 0)
+            {
+                Console.Error.WriteLine("No story scripts in the raw mirror. Run 'shinymas-dl download --categories json' first.");
+                return 1;
+            }
+
+            foreach (var (id, name) in names.Characters.OrderBy(c => c.Key, StringComparer.Ordinal))
+            {
+                Console.WriteLine($"{id}  {name.Label,-12}  {name.Name}");
+            }
+
+            return 0;
+        });
+
+        return command;
+    }
+
+    private static Command BuildExtractCommand()
+    {
+        var filtersArgument = FiltersArgument();
+        var categoriesOption = CategoriesOption();
+        var overwriteOption = new Option<bool>("--overwrite") { Description = "Rewrite output files that already exist" };
+        var concurrencyOption = new Option<int>("--concurrency")
+        {
+            Description = "Files processed in parallel",
+            DefaultValueFactory = _ => Environment.ProcessorCount,
+        };
+
+        var command = new Command("extract", "Decrypt and organize the raw mirror into the named output tree");
+        command.Arguments.Add(filtersArgument);
+        command.Options.Add(categoriesOption);
+        command.Options.Add(overwriteOption);
+        command.Options.Add(concurrencyOption);
+
+        command.SetAction(parseResult =>
+        {
+            var workspace = WorkspaceFrom(parseResult);
+            if (!Directory.Exists(workspace.RawRoot))
+            {
+                Console.Error.WriteLine($"No raw mirror at {Path.GetFullPath(workspace.RawRoot)}. Run 'shinymas-dl download' first.");
+                return 1;
+            }
+
+            var names = ResolveNames(workspace);
+            Console.WriteLine(names.Count > 0
+                ? $"Named {names.Count} characters from the story scripts"
+                : "No story scripts mirrored; character folders will use bare ids");
+
+            var filter = new AssetFilter(
+                AssetFilter.ParseCategories(parseResult.GetValue(categoriesOption)),
+                parseResult.GetValue(filtersArgument) ?? []);
+            var options = new ExtractOptions(
+                workspace.RawRoot,
+                workspace.OutputRoot,
+                parseResult.GetValue(overwriteOption),
+                parseResult.GetValue(concurrencyOption));
+
+            var stats = new Extractor(options, names, Console.Error.WriteLine).Run(filter);
+
+            Console.WriteLine(
+                $"Wrote {stats.Written} files ({stats.Scripts} transcripts), skipped {stats.Skipped} existing, " +
+                $"failed {stats.Failed} into {Path.GetFullPath(workspace.OutputRoot)}");
 
             return stats.Failed == 0 ? 0 : 1;
         });
