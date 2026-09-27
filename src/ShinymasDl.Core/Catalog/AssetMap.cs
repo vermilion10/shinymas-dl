@@ -5,7 +5,7 @@ using ShinymasDl.Core.Download;
 
 namespace ShinymasDl.Core.Catalog;
 
-/// <summary> the client's own file list: a manifest naming ~130 chunks, each mapping about 3000 paths to a version </summary>
+/// <summary> the client's own file list: a manifest naming chunks, each mapping about 3000 paths to a version </summary>
 public sealed class AssetMap
 {
     private const string ManifestFile = "asset-map.json";
