@@ -268,3 +268,36 @@ Consequences for login support:
   login got the game's `401` with and without a browser User-Agent.
 - The command needs a fresh token at run time, read from an environment variable
   or a file under `data/`, and should log in immediately.
+
+## Confirmed with a logged-in session (2026-09-27)
+
+Login chain, all from the cloud host:
+
+| Step | Request | Result |
+|---|---|---|
+| 1 | `GET platform-sdk.enza.fun/sessions/user_code?app_id=1&ts=<ms>` with cookie `_enza_session` | `200`, `{"token": "<game JWT>"}`, valid about 3 minutes |
+| 2 | `POST login` with `Authorization: <game JWT>` | `200`, `{isCreated, user}`, first `X-Sessionid` arrives |
+| 3 | `GET gameTop` | `200`, `X-Sessionid` and `X-Tutorial-Progress-Status` |
+| 4 | `GET album/top` | `200`, 28 characters |
+| 5 | `POST characterAlbums/characters/1` | `200`, full album |
+
+`_enza_session` is a 32-character opaque value on `platform-sdk.enza.fun`. It is the
+long-lived credential; the tool can mint a fresh game token from it on every run.
+A different JWT from `portal.enza.fun` (claims `user_id`, `bn_user_id`,
+`token_created_at`) is not accepted by the game, and a stale or foreign
+`_enza_session` gets a guest identity (`isCreated: false`), which makes album calls
+fail with `1010`.
+
+Character 001 album:
+
+- 22 produce cards (3 owned) and 42 support cards (4 owned). Every entry, owned or
+  not, has a 32-character `hash`; none are empty, old cards included.
+- All 64 card ids for character 001 in asset map v442 appear in the album,
+  including the `193`, `194`, `293` and `294` groups.
+- Costumes (`idolCostumes`, 23 entries) carry `hash`, `characterHash` and
+  `evolutionSkinHash`.
+- For unowned card `1940010010`, `images/content/idols/card/<hash>_1940010010.jpg`
+  returned `200 image/jpeg` (76,235 bytes); the unprefixed URL returned the SPA page.
+
+Still open: whisper `voiceHash` for unreleased voices (character 001 has none; the
+42 whisper files belong to `204014020`, character 014).
