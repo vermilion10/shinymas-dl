@@ -73,10 +73,16 @@ All 10,804 JSON files come to 21 MiB and took about 4 minutes at
 `--concurrency 16` in one test run.
 
 Some listed files cannot be downloaded without a game session. The client adds a
-per-card hash from the logged-in API to those filenames (`<hash>_<id>.jpg`). In
-a random sample of 600 entries, 64 were unavailable, mostly under
-`images/content/idols`, `images/content/gasha` and
-`images/content/support_idols`. They are reported as missing.
+per-card hash from the logged-in API to those filenames (`<hash>_<id>.jpg`), and
+the hash cannot be derived from the id. They are reported as missing. Card art is
+hit hardest; a HEAD check of every card image in asset map v442 found:
+
+| Folder | Reachable |
+|---|---|
+| `images/content/idols/card` | 68 of 546 |
+| `images/content/support_idols/card` | 76 of 915 |
+
+Spine models, card voices and story voices were reachable in every sample tried.
 
 ### names
 
