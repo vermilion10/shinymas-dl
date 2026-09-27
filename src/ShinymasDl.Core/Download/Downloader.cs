@@ -85,7 +85,8 @@ public sealed class Downloader(DownloadOptions options, DownloadIndex index, Act
 
         if (index.TryGet(entry.Path, out var record) && record.Version == entry.Version)
         {
-            if (record.Missing)
+            // A file recorded missing before its card hash was known gets one more try with the hash.
+            if (record.Missing && (entry.CdnPath is null || record.Hashed))
             {
                 return Outcome.Missing;
             }
@@ -101,39 +102,47 @@ public sealed class Downloader(DownloadOptions options, DownloadIndex index, Act
             return Outcome.Downloaded;
         }
 
+        var hashed = entry.CdnPath is not null;
+        string[] urls = hashed ? [entry.Url(options.AssetRoot), entry.PlainUrl(options.AssetRoot)] : [entry.Url(options.AssetRoot)];
+
         try
         {
-            using var response = await ShinyHttpClient.Instance.GetAsync(
-                entry.Url(options.AssetRoot), HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-
-            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden
-                || (response.IsSuccessStatusCode && ShinyHttpClient.IsSpaFallback(response)))
+            foreach (var url in urls)
             {
-                index.Record(entry.Path, new IndexRecord { Version = entry.Version, Missing = true });
-                return Outcome.Missing;
+                using var response = await ShinyHttpClient.Instance.GetAsync(
+                    url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+                if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden
+                    || (response.IsSuccessStatusCode && ShinyHttpClient.IsSpaFallback(response)))
+                {
+                    continue;
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    log($"  {(int)response.StatusCode} {entry.Path}");
+                    return Outcome.Failed;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+
+                var temporary = destination + ".part";
+                long size;
+                await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken))
+                await using (var target = File.Create(temporary))
+                {
+                    await source.CopyToAsync(target, cancellationToken);
+                    size = target.Length;
+                }
+
+                File.Move(temporary, destination, overwrite: true);
+                index.Record(entry.Path, new IndexRecord { Version = entry.Version, Size = size, Hashed = hashed });
+                Interlocked.Add(ref _bytes, size);
+                return Outcome.Downloaded;
             }
 
-            if (!response.IsSuccessStatusCode)
-            {
-                log($"  {(int)response.StatusCode} {entry.Path}");
-                return Outcome.Failed;
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-
-            var temporary = destination + ".part";
-            long size;
-            await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken))
-            await using (var target = File.Create(temporary))
-            {
-                await source.CopyToAsync(target, cancellationToken);
-                size = target.Length;
-            }
-
-            File.Move(temporary, destination, overwrite: true);
-            index.Record(entry.Path, new IndexRecord { Version = entry.Version, Size = size });
-            Interlocked.Add(ref _bytes, size);
-            return Outcome.Downloaded;
+            index.Record(entry.Path, new IndexRecord { Version = entry.Version, Missing = true, Hashed = hashed });
+            return Outcome.Missing;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

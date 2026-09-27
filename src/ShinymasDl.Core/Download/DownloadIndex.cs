@@ -17,6 +17,11 @@ public sealed class IndexRecord
     [JsonPropertyName("missing")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Missing { get; set; }
+
+    /// <summary> the fetch knew the card hash; a missing file without it is retried once a hash appears </summary>
+    [JsonPropertyName("hashed")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Hashed { get; set; }
 }
 
 /// <summary> what the raw mirror already holds, so a re-run only fetches new or changed versions </summary>

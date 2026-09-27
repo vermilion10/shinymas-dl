@@ -1,5 +1,6 @@
 using System.CommandLine;
 using ShinymasDl.Core;
+using ShinymasDl.Core.Api;
 using ShinymasDl.Core.Catalog;
 using ShinymasDl.Core.Download;
 using ShinymasDl.Core.Extraction;
@@ -40,6 +41,7 @@ public static class Program
 
         root.Subcommands.Add(BuildRefreshCommand());
         root.Subcommands.Add(BuildListCommand());
+        root.Subcommands.Add(BuildAlbumsCommand());
         root.Subcommands.Add(BuildDownloadCommand());
         root.Subcommands.Add(BuildNamesCommand());
         root.Subcommands.Add(BuildExtractCommand());
@@ -145,6 +147,83 @@ public static class Program
         return command;
     }
 
+    private const string SessionVariable = "SHINYMAS_SESSION";
+
+    private static Command BuildAlbumsCommand()
+    {
+        var charactersOption = new Option<string?>("--characters")
+        {
+            Description = "Comma-separated character ids to read, e.g. 1,14; default is every character in the album",
+        };
+        var refreshOption = new Option<bool>("--refresh") { Description = "Re-read characters already recorded" };
+        var delayOption = new Option<int>("--delay")
+        {
+            Description = "Milliseconds to wait between album requests",
+            DefaultValueFactory = _ => 1000,
+        };
+
+        var command = new Command(
+            "albums",
+            $"Log in with the enza session in {SessionVariable} and record card hashes from every character album");
+        command.Options.Add(charactersOption);
+        command.Options.Add(refreshOption);
+        command.Options.Add(delayOption);
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var session = Environment.GetEnvironmentVariable(SessionVariable)?.Trim().Trim('"');
+            if (string.IsNullOrEmpty(session))
+            {
+                Console.Error.WriteLine(
+                    $"Set {SessionVariable} to the _enza_session cookie sent to platform-sdk.enza.fun while logged in.");
+                return 1;
+            }
+
+            var workspace = WorkspaceFrom(parseResult);
+            var only = parseResult.GetValue(charactersOption) is { Length: > 0 } list
+                ? list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(AlbumCrawler.Normalize).ToHashSet(StringComparer.Ordinal)
+                : null;
+
+            try
+            {
+                var bundle = await ClientBundle.ResolveAsync(workspace.DataRoot, Console.WriteLine, cancellationToken);
+                using var client = new GameApiClient(bundle, new RequestCodec(bundle.CodecPath(workspace.DataRoot)), session);
+                await client.LoginAsync(cancellationToken);
+                Console.WriteLine("Logged in");
+
+                var store = CardHashes.Load(workspace.DataRoot);
+                var crawler = new AlbumCrawler(client, store, workspace.DataRoot, Console.WriteLine);
+                var summaries = await crawler.RunAsync(
+                    only, parseResult.GetValue(refreshOption), TimeSpan.FromMilliseconds(Math.Max(0, parseResult.GetValue(delayOption))),
+                    cancellationToken);
+
+                foreach (var s in summaries)
+                {
+                    Console.WriteLine(
+                        $"  {s.CharacterId,3}: {s.Cards} cards ({s.UnownedCards} unowned, {s.UnownedCardsWithHash} with hash), " +
+                        $"{s.Costumes} costumes, {s.Whispers} whisper voices ({s.LockedWhispers} locked, {s.LockedWhispersWithHash} with hash)");
+                    if (s.Whispers > 0)
+                    {
+                        Console.WriteLine($"       whisper fields: {string.Join(", ", s.WhisperFields)}");
+                    }
+                }
+
+                Console.WriteLine(
+                    $"{store.Characters.Count} characters recorded, {store.AllCards().Count} card hashes in " +
+                    Path.GetFullPath(CardHashes.PathIn(workspace.DataRoot)));
+                return 0;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or InvalidDataException)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+        });
+
+        return command;
+    }
+
     private static Command BuildDownloadCommand()
     {
         var filtersArgument = FiltersArgument();
@@ -180,13 +259,20 @@ public static class Program
                 AssetFilter.ParseCategories(parseResult.GetValue(categoriesOption)),
                 parseResult.GetValue(filtersArgument) ?? []);
 
-            var entries = filter.Apply(map.Entries).ToList();
+            var hashedPaths = HashedPaths.Load(workspace.DataRoot);
+            var entries = filter.Apply(map.Entries).Select(hashedPaths.Apply).ToList();
             if (parseResult.GetValue(webpOption))
             {
                 entries = entries.Select(e => e.AsWebP()).ToList();
             }
 
             Console.WriteLine($"Asset map v{map.Version}: {entries.Count} of {map.Entries.Count} files selected");
+            if (hashedPaths.CardCount > 0)
+            {
+                Console.WriteLine(
+                    $"Card hashes: {hashedPaths.CardCount} cards, {hashedPaths.WhisperCount} whisper voices; " +
+                    $"{entries.Count(e => e.CdnPath is not null)} selected files use a hashed path");
+            }
 
             var options = new DownloadOptions(
                 AssetRootFrom(parseResult),

@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Jint" Version="4.16.4" />
+  </ItemGroup>
+
 </Project>
