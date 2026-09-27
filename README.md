@@ -21,6 +21,7 @@ dotnet build ShinymasDl.slnx
 
 shinymas-dl refresh
 shinymas-dl list [filters...] [--categories ...] [--stats] [--depth n]
+shinymas-dl albums [--characters 1,14] [--refresh] [--delay ms]
 shinymas-dl download [filters...] [--categories ...] [--webp] [--concurrency n] [--dry-run] [--retry-missing]
 shinymas-dl names
 shinymas-dl extract [filters...] [--categories ...] [--overwrite] [--concurrency n]
@@ -74,15 +75,53 @@ All 10,804 JSON files come to 21 MiB and took about 4 minutes at
 
 Some listed files cannot be downloaded without a game session. The client adds a
 per-card hash from the logged-in API to those filenames (`<hash>_<id>.jpg`), and
-the hash cannot be derived from the id. They are reported as missing. Card art is
-hit hardest; a HEAD check of every card image in asset map v442 found:
+the hash cannot be derived from the id. Without hashes they are reported as missing.
+Card art is hit hardest; a HEAD check of every card image in asset map v442 found:
 
-| Folder | Reachable |
+| Folder | Reachable without hashes |
 |---|---|
 | `images/content/idols/card` | 68 of 546 |
 | `images/content/support_idols/card` | 76 of 915 |
 
 Spine models, card voices and story voices were reachable in every sample tried.
+Run `albums` first to record the hashes; `download` then fetches these files from
+their hashed path. See [albums](#albums).
+
+### albums
+
+Logs in with an enza account and reads every character album, which lists each
+card with its hash whether the account owns it or not. It needs the account's
+`_enza_session` cookie in the `SHINYMAS_SESSION` environment variable:
+
+1. Open the game in a browser, logged in, past the opening.
+2. In DevTools, open a `platform-sdk.enza.fun/sessions/ping` request and copy the
+   `_enza_session` value from its `cookie` request header.
+3. Set `SHINYMAS_SESSION` to that value and run `shinymas-dl albums`.
+
+```sh
+shinymas-dl albums --characters 1   # one character first
+shinymas-dl albums                  # the rest; recorded characters are skipped
+shinymas-dl download
+```
+
+The session value is only read from the environment. The tool never prints or
+stores it, nor the game token and session ids it gets while logged in. Logging
+out of enza in the browser invalidates it.
+
+Results go to `data/card-hashes.json`, grouped by character: card, costume,
+evolution skin and whisper voice ids mapped to their hashes, nothing else. The file
+is saved after each character, so an interrupted run resumes where it stopped;
+`--refresh` reads recorded characters again. Requests go out one at a time, with
+`--delay` milliseconds (default 1000) between albums.
+
+The request codec is the game's own `request_hash` module. `albums` downloads it
+from the game site on first use, caches it under `data/client/`, and runs it with
+[Jint](https://github.com/sebastienros/jint).
+
+One crawl of a dummy account (asset map v442) recorded 1,440 of the 1,461 card ids
+in the file list. The other 21 belong to characters without an album page (the
+`8xx` collaboration characters and Hazuki). 36 of the 42 whisper voice files have a
+hash; the `...000.m4a` file of each whisper set is not referenced by any album.
 
 ### names
 

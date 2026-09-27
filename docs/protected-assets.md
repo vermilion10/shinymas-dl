@@ -1,14 +1,14 @@
 # Protected card assets
 
 How the client finds the real CDN path for card assets that `download` reports as
-missing, and what a downloader would need to reproduce it. Research only; nothing
-here is implemented yet.
+missing, and what a downloader needs to reproduce it. The `albums` command
+implements the flow; the sections below are the research that led to it.
 
 Evidence comes from static analysis of client build `app-7a9a95e69a346e6e7147.js`
 and its 1,109 lazy-loaded chunks, plus unauthenticated HEAD checks against the CDN.
 Module ids (`28512`, `83078`, ...) are webpack ids from that build and will change
-between builds. Nothing below was observed on a logged-in session; the
-"Confirm with a capture" section lists what still needs one.
+between builds. The early sections come from static analysis alone; the dated
+sections at the end record what a logged-in session confirmed.
 
 ## Summary
 
@@ -299,5 +299,40 @@ Character 001 album:
 - For unowned card `1940010010`, `images/content/idols/card/<hash>_1940010010.jpg`
   returned `200 image/jpeg` (76,235 bytes); the unprefixed URL returned the SPA page.
 
-Still open: whisper `voiceHash` for unreleased voices (character 001 has none; the
-42 whisper files belong to `204014020`, character 014).
+Whisper voices were checked on character 014; the account owns none of the support
+cards that carry them.
+
+## Whisper voices and the full crawl (2026-09-27)
+
+Character 014 album, read with `shinymas-dl albums --characters 14`:
+
+- 6 whisper voices on support card `2040140200`. The account does not own the card,
+  so all 6 are locked, and all 6 have a `voiceHash`. Locked whispers do expose their
+  hash; release is decided on the client from the evolution stage.
+- Whisper entry fields: `hash`, `id`, `idolId`, `idolType`, `sort`, `time`,
+  `title`, `track`, `voiceHash`. `id` is the file name, so
+  `sounds/voice/whisper/2040140200/204014020001.m4a` lives at
+  `.../2040140200/<voiceHash>_204014020001.m4a`.
+- All 6 downloaded through the hashed path (64.6 MiB together).
+
+Full crawl of all 28 album characters, same dummy account:
+
+| Result | Count |
+|---|---|
+| Card hashes recorded | 1,440 |
+| Card ids in asset map v442 (`images/content/idols` and `support_idols`) | 1,461 |
+| Card ids without a hash | 21 |
+| Unowned cards without a hash, any character | 0 |
+| Whisper voices, all locked, all with `voiceHash` | 36 |
+| Whisper files in the asset map | 42 |
+
+- The 21 card ids without a hash are `1048...` (collaboration characters 801 to 804)
+  and `20309...` (Hazuki, 091). `album/top` lists 28 characters and none of these,
+  so no album page carries their hashes.
+- The 6 whisper files without a hash are the `...000.m4a` file of each set
+  (`204002022000`, `204008020000`, `204012019000`, `204014020000`, `204018020000`,
+  `204021017000`). No album entry references them; their source is unknown.
+- `idol_evolution_pieces` images use the piece's own hash, not the card's, and stay
+  unreachable.
+- Costumes: 23 of 23 base costumes for character 001 share their card's hash, so
+  card hashes already cover costume art under `images/content/idols`.
