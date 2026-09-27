@@ -227,3 +227,38 @@ Then check:
 2. A support card entry with whisper voices you have not released: is `voiceHash`
    present?
 3. Whether any `193`/`194`/`293`/`294` ids appear in album responses.
+
+## Live test from a US host (2026-09-27)
+
+A dummy account's platform token was tried from a cloud container in the US.
+
+Token: an RS256 JWT with claims `code`, `exp`, `id`, `is_app_installed`,
+`is_apple_linked`, `is_game_user_registered`, `is_guest`, `registration_methods`
+and `status`. It had no `iat`, and its `exp` had passed about two minutes before
+the test, so the lifetime is short. A token saved ahead of time will not work; the
+tool has to log in right after the token is captured and then keep going on the
+session id.
+
+API responses to single requests:
+
+| Request | Result |
+|---|---|
+| Raw junk body | `500`, nginx page |
+| Encoded `POST /login` with the expired token | `403`, nginx page, no `x-sessionid` |
+| Encoded request with no `Authorization` | `403`, same |
+| Encoded request with a malformed JWT | `403`, same |
+| Same, with browser `User-Agent` and fetch headers | `403`, same page with browser padding |
+
+The junk body reaching a `500` means the backend received it and failed to decode
+it. Every correctly encoded request got the same `403` regardless of token or
+headers, so the rejection happens after decoding and before the token matters.
+That fits a source IP or region allowlist on the API; the asset CDN answered
+normally from the same host. The API resolves to AWS `ap-northeast-1` addresses.
+Not proven without a request from a Japanese IP.
+
+Consequences for login support:
+
+- API calls have to leave from a network the game accepts, most likely the same
+  route the user plays through. The CDN part of the tool can keep running anywhere.
+- The command needs a fresh token at run time (argument-free: environment variable
+  or a file under `data/`), and should log in immediately.
