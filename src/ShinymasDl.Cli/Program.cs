@@ -38,6 +38,7 @@ public static class Program
 
         root.Subcommands.Add(BuildRefreshCommand());
         root.Subcommands.Add(BuildListCommand());
+        root.Subcommands.Add(BuildDownloadCommand());
 
         return await root.Parse(args).InvokeAsync();
     }
@@ -140,6 +141,72 @@ public static class Program
         return command;
     }
 
+    private static Command BuildDownloadCommand()
+    {
+        var filtersArgument = FiltersArgument();
+        var categoriesOption = CategoriesOption();
+        var webpOption = new Option<bool>("--webp")
+        {
+            Description = "Fetch the .webp twin of every .png (smaller, lossy); PNG is the default",
+        };
+        var concurrencyOption = new Option<int>("--concurrency")
+        {
+            Description = "Simultaneous requests",
+            DefaultValueFactory = _ => 8,
+        };
+        var retryMissingOption = new Option<bool>("--retry-missing")
+        {
+            Description = "Re-check files previously recorded as missing",
+        };
+        var dryRunOption = new Option<bool>("--dry-run") { Description = "Count what would be fetched without fetching" };
+
+        var command = new Command("download", "Mirror assets from the CDN into <output>/raw");
+        command.Arguments.Add(filtersArgument);
+        command.Options.Add(categoriesOption);
+        command.Options.Add(webpOption);
+        command.Options.Add(concurrencyOption);
+        command.Options.Add(retryMissingOption);
+        command.Options.Add(dryRunOption);
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            var workspace = WorkspaceFrom(parseResult);
+            var map = workspace.LoadAssetMap();
+            var filter = new AssetFilter(
+                AssetFilter.ParseCategories(parseResult.GetValue(categoriesOption)),
+                parseResult.GetValue(filtersArgument) ?? []);
+
+            var entries = filter.Apply(map.Entries).ToList();
+            if (parseResult.GetValue(webpOption))
+            {
+                entries = entries.Select(e => e.AsWebP()).ToList();
+            }
+
+            Console.WriteLine($"Asset map v{map.Version}: {entries.Count} of {map.Entries.Count} files selected");
+
+            var options = new DownloadOptions(
+                AssetRootFrom(parseResult),
+                workspace.RawRoot,
+                parseResult.GetValue(concurrencyOption),
+                parseResult.GetValue(retryMissingOption),
+                parseResult.GetValue(dryRunOption));
+
+            var index = DownloadIndex.Load(workspace.RawRoot);
+            var progress = new ConsoleProgress(entries.Count);
+            var stats = await new Downloader(options, index, progress.Log).RunAsync(entries, progress, cancellationToken);
+            progress.Finish();
+
+            var verb = options.DryRun ? "Would fetch" : "Downloaded";
+            Console.WriteLine(
+                $"{verb} {stats.Downloaded} ({Human(stats.Bytes)}), up to date {stats.Skipped}, " +
+                $"missing {stats.Missing}, failed {stats.Failed}");
+
+            return stats.Failed == 0 ? 0 : 1;
+        });
+
+        return command;
+    }
+
     private static string Human(long bytes) => bytes switch
     {
         >= 1L << 30 => $"{bytes / (double)(1L << 30):F2} GiB",
@@ -147,4 +214,39 @@ public static class Program
         >= 1L << 10 => $"{bytes / (double)(1L << 10):F0} KiB",
         _ => $"{bytes} B",
     };
+
+    /// <summary> one rewritten status line; per-file output would bury the failures </summary>
+    private sealed class ConsoleProgress(int total) : IProgress<DownloadStats>
+    {
+        private readonly object _lock = new();
+        private DateTime _lastDraw = DateTime.MinValue;
+
+        public void Report(DownloadStats value)
+        {
+            lock (_lock)
+            {
+                var now = DateTime.UtcNow;
+                if (Console.IsOutputRedirected || (value.Done < total && now - _lastDraw < TimeSpan.FromMilliseconds(250)))
+                {
+                    return;
+                }
+
+                _lastDraw = now;
+                Console.Write(
+                    $"\r  {value.Done}/{total}  got {value.Downloaded} ({Human(value.Bytes)})  " +
+                    $"cached {value.Skipped}  missing {value.Missing}  failed {value.Failed}   ");
+            }
+        }
+
+        public void Log(string message)
+        {
+            lock (_lock)
+            {
+                Console.WriteLine();
+                Console.Error.WriteLine(message);
+            }
+        }
+
+        public void Finish() => Console.WriteLine();
+    }
 }
