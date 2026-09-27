@@ -247,6 +247,7 @@ API responses to single requests:
 | Encoded `POST /login`, expired, fake or no token | Node `fetch` | `403`, nginx page |
 | Single junk byte | `curl` | `500`, nginx page |
 | Encoded `POST /login`, no token | `curl` | `401`, encrypted body |
+| Encoded `POST /login`, no token | .NET `HttpClient` | `401`, encrypted body |
 
 The `403` answered anything sent by Node's `fetch`, junk included, so it is a filter
 on that client's request shape, not on the IP or the token. From the same host and
@@ -263,7 +264,7 @@ normal, non-Japanese connection, so there is no region lock.
 
 Consequences for login support:
 
-- The HTTP client matters. The .NET `HttpClient` request shape has to be checked
-  against the filter before building on it; match what `curl` sends if needed.
+- The HTTP client matters. .NET `HttpClient` passes the filter: the same no-token
+  login got the game's `401` with and without a browser User-Agent.
 - The command needs a fresh token at run time, read from an environment variable
   or a file under `data/`, and should log in immediately.
