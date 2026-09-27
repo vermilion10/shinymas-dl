@@ -211,17 +211,19 @@ public static class Program
         return command;
     }
 
-    /// <summary> rebuilds names.json from the mirrored scripts, or keeps the cached one when none are mirrored </summary>
+    /// <summary> merges names from the mirrored scripts into names.json, so a partial mirror never shrinks it </summary>
     private static NameIndex ResolveNames(Workspace workspace)
     {
+        var cached = NameIndex.Load(workspace.DataRoot);
         var built = NameIndex.Build(workspace.RawRoot);
-        if (built.Count > 0)
+        if (built.Count == 0)
         {
-            built.Save(workspace.DataRoot);
-            return built;
+            return cached;
         }
 
-        return NameIndex.Load(workspace.DataRoot);
+        var merged = cached.MergedWith(built);
+        merged.Save(workspace.DataRoot);
+        return merged;
     }
 
     private static Command BuildNamesCommand()

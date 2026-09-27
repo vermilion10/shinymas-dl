@@ -48,6 +48,18 @@ public sealed class NameIndex
         return new NameIndex(characters ?? []);
     }
 
+    /// <summary> entries from <paramref name="newer"/> win; ids it lacks keep their cached names </summary>
+    public NameIndex MergedWith(NameIndex newer)
+    {
+        var merged = new Dictionary<string, CharacterName>(_characters, StringComparer.Ordinal);
+        foreach (var (id, name) in newer._characters)
+        {
+            merged[id] = name with { Name = name.Name ?? merged.GetValueOrDefault(id)?.Name };
+        }
+
+        return new NameIndex(merged);
+    }
+
     public void Save(string dataRoot)
     {
         Directory.CreateDirectory(dataRoot);
