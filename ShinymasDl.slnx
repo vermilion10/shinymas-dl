@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ShinymasDl.Cli/ShinymasDl.Cli.csproj" />
+    <Project Path="src/ShinymasDl.Core/ShinymasDl.Core.csproj" />
+  </Folder>
+</Solution>
